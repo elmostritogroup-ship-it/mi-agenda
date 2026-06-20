@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mis Pendientes — El Mostrito</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #F5F5F0; color: #1a1a1a; padding: 1.5rem 1rem; }
+  .wrap { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 500; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: #6b7280; margin-bottom: 1.25rem; }
+  .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 1.25rem; }
+  .sync-ok  { font-size: 12px; color: #059669; }
+  .sync-err { font-size: 12px; color: #DC2626; }
+  .btn-sync { margin-left: auto; font-size: 12px; padding: 5px 12px; border: 0.5px solid #d1d5db; border-radius: 8px; background: #fff; cursor: pointer; }
+  .btn-sync:hover { background: #f3f4f6; }
+  .upload { border: 1.5px dashed #d1d5db; border-radius: 12px; background: #fafafa; padding: 1rem; text-align: center; cursor: pointer; margin-bottom: 1.25rem; font-size: 13px; color: #6b7280; }
+  .upload:hover { border-color: #6366F1; background: #EEF2FF; }
+  .upload input { display: none; }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 1.25rem; }
+  .filter-btn { font-size: 12px; padding: 5px 12px; border-radius: 999px; border: 0.5px solid #d1d5db; background: #fff; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  .filter-btn.active { border: 1.5px solid #6366F1; background: #EEF2FF; color: #3730A3; font-weight: 500; }
+  .badge-count { background: #6366F1; color: #fff; border-radius: 999px; font-size: 10px; padding: 0 5px; font-weight: 600; }
+  .section-label { font-size: 11px; font-weight: 500; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 8px; }
+  .task-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 1.5rem; }
+  .task { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: #fff; border: 0.5px solid #e5e7eb; border-radius: 8px; transition: opacity .15s; }
+  .task.done { opacity: 0.5; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; }
+  .dot.alta { background: #EF4444; }
+  .dot.media { background: #F59E0B; }
+  .dot.baja { background: #D1D5DB; }
+  .task input[type=checkbox] { margin-top: 2px; accent-color: #6366F1; flex-shrink: 0; cursor: pointer; }
+  .task-body { flex: 1; min-width: 0; }
+  .task-text { font-size: 13px; line-height: 1.5; }
+  .task.done .task-text { text-decoration: line-through; color: #6b7280; }
+  .task-sub  { font-size: 12px; color: #6b7280; margin-top: 3px; }
+  .task-snip { font-size: 11px; color: #9ca3af; margin-top: 3px; line-height: 1.4; }
+  .source-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; margin-top: 4px; }
+  .badge-Agenda     { background: #EEF2FF; color: #3730A3; border: 1px solid #C7D2FE; }
+  .badge-Correo     { background: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; }
+  .badge-Calendario { background: #FDF2F8; color: #831843; border: 1px solid #F9A8D4; }
+  .btn-del { background: none; border: none; cursor: pointer; color: #9ca3af; font-size: 16px; padding: 2px; line-height: 1; flex-shrink: 0; }
+  .btn-del:hover { color: #EF4444; }
+  .empty { text-align: center; color: #6b7280; font-size: 13px; padding: 2rem 0; }
+  .loading { text-align: center; color: #6b7280; font-size: 13px; padding: 2rem 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Mis pendientes</h1>
+  <p class="sub">El Mostrito Chicken · sincronizado con Gmail y Google Calendar</p>
+  <div class="topbar">
+    <span id="sync-status" class="sync-ok" style="display:none"></span>
+    <button class="btn-sync" onclick="fetchGoogle()">↻ Actualizar</button>
+  </div>
+  <div class="upload" onclick="document.getElementById('file-input').click()">
+    <input type="file" id="file-input" accept="image/*" onchange="processImage(this.files[0])">
+    <span id="upload-label">📷 Sube una foto de tu agenda para extraer pendientes con IA</span>
+  </div>
+  <div class="filters" id="filters"></div>
+  <div id="content"><p class="loading">Cargando tus datos de Google...</p></div>
+</div>
+
+<script>
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxnv-0J3n1l0b0cZBQRZuT3NIc_-mehzHdsz9xyNnSsVw0e0jMXsPNjnVgOFF_DQQMb/exec";
+
+let tasks  = [];
+let filter = "Todos";
+
+function fetchGoogle() {
+  document.getElementById("sync-status").style.display = "none";
+  document.getElementById("content").innerHTML = '<p class="loading">Sincronizando con Google...</p>';
+  const cbName = "__gs_" + Date.now();
+  const script = document.createElement("script");
+  const timer = setTimeout(function() {
+    delete window[cbName];
+    if (script.parentNode) document.head.removeChild(script);
+    showError("Tiempo de espera agotado. Verifica tu conexion.");
+  }, 20000);
+
+  window[cbName] = function(data) {
+    clearTimeout(timer);
+    delete window[cbName];
+    if (script.parentNode) document.head.removeChild(script);
+    if (data.error) { showError(data.error); return; }
+    var correos = (data.correos||[]).map(function(c) {
+      return { id:"gm_"+c.id, source:"Correo", text:c.asunto||"(sin asunto)", sub:"De: "+c.de, snippet:c.snippet, priority:"media", done:false };
+    });
+    var eventos = (data.eventos||[]).map(function(e) {
+      return { id:"gc_"+e.id, source:"Calendario", text:e.titulo, sub: e.todo_dia==="si" ? fmtFecha(e.inicio,true) : fmtFecha(e.inicio,false), priority:"alta", done:false };
+    });
+    tasks = tasks.filter(function(t){ return t.source==="Agenda"; }).concat(correos).concat(eventos);
+    var el = document.getElementById("sync-status");
+    el.textContent = "Sincronizado " + new Date().toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"});
+    el.style.display = "inline";
+    render();
+  };
+
+  script.src = SCRIPT_URL + "?callback=" + cbName;
+  script.onerror = function() { clearTimeout(timer); showError("No se pudo conectar con Google."); };
+  document.head.appendChild(script);
+}
+
+function fmtFecha(iso, soloFecha) {
+  if (!iso) return "";
+  var d = new Date(iso);
+  if (soloFecha) return d.toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short"});
+  return d.toLocaleDateString("es-PE",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
+}
+
+function showError(msg) {
+  document.getElementById("content").innerHTML = '<p class="empty">Error: '+msg+'</p>';
+}
+
+function toggle(id) {
+  tasks = tasks.map(function(t){ return t.id===id ? Object.assign({},t,{done:!t.done}) : t; });
+  render();
+}
+
+function removeTask(id) {
+  tasks = tasks.filter(function(t){ return t.id!==id; });
+  render();
+}
+
+function setFilter(f) { filter = f; render(); }
+
+function render() {
+  var sections = ["Todos","Agenda","Correo","Calendario"];
+  var counts = {};
+  sections.forEach(function(s) {
+    counts[s] = s==="Todos" ? tasks.filter(function(t){return !t.done;}).length : tasks.filter(function(t){return t.source===s&&!t.done;}).length;
+  });
+
+  document.getElementById("filters").innerHTML = sections.map(function(s) {
+    return '<button class="filter-btn '+(filter===s?'active':'')+'" onclick="setFilter(\''+s+'\')">'+s+(counts[s]>0?' <span class="badge-count">'+counts[s]+'</span>':'')+'</button>';
+  }).join("");
+
+  var visible = tasks.filter(function(t){ return filter==="Todos"||t.source===filter; });
+  var pending = visible.filter(function(t){ return !t.done; });
+  var done    = visible.filter(function(t){ return  t.done; });
+
+  var html = "";
+  if (pending.length===0 && done.length===0) html = '<p class="empty">No hay pendientes en esta vista.</p>';
+  if (pending.length>0) {
+    html += '<p class="section-label">Por hacer &middot; '+pending.length+'</p><div class="task-list">';
+    html += pending.map(taskHTML).join(""); html += "</div>";
+  }
+  if (done.length>0) {
+    html += '<p class="section-label">Completados &middot; '+done.length+'</p><div class="task-list">';
+    html += done.map(taskHTML).join(""); html += "</div>";
+  }
+  document.getElementById("content").innerHTML = html;
+}
+
+function taskHTML(t) {
+  return '<div class="task '+(t.done?'done':'')+'">'+
+    '<div class="dot '+t.priority+'"></div>'+
+    '<input type="checkbox" '+(t.done?'checked':'')+' onchange="toggle(\''+t.id+'\')">'+
+    '<div class="task-body">'+
+      '<div class="task-text">'+t.text+'</div>'+
+      (t.sub?'<div class="task-sub">'+t.sub+'</div>':'')+
+      (t.snippet?'<div class="task-snip">'+t.snippet+'</div>':'')+
+      '<span class="source-badge badge-'+t.source+'">'+t.source+'</span>'+
+    '</div>'+
+    '<button class="btn-del" onclick="removeTask(\''+t.id+'\')">x</button>'+
+  '</div>';
+}
+
+async function processImage(file) {
+  if (!file) return;
+  document.getElementById("upload-label").textContent = "Analizando tu agenda...";
+  var base64 = await new Promise(function(res,rej){
+    var r=new FileReader(); r.onload=function(){res(r.result.split(",")[1]);}; r.onerror=rej; r.readAsDataURL(file);
+  });
+  try {
+    var resp = await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:[
+        {type:"image",source:{type:"base64",media_type:file.type,data:base64}},
+        {type:"text",text:'Extrae tareas pendientes de esta imagen de agenda. Responde SOLO con JSON sin backticks: {"tasks":[{"text":"tarea","priority":"alta|media|baja"}]}. Si no hay tareas: {"tasks":[]}.'}
+      ]}]})
+    });
+    var d = await resp.json();
+    var raw = (d.content&&d.content.find(function(b){return b.type==="text";})||{text:"{}"}).text;
+    var parsed = JSON.parse(raw.replace(/```json|```/g,"").trim());
+    if (parsed.tasks&&parsed.tasks.length) {
+      var nuevas = parsed.tasks.map(function(t,i){
+        return {id:"img_"+Date.now()+"_"+i,source:"Agenda",text:t.text,priority:t.priority||"media",done:false};
+      });
+      tasks = nuevas.concat(tasks);
+      render();
+    }
+  } catch(e) { alert("Error al procesar imagen: "+e.message); }
+  document.getElementById("upload-label").textContent = "Sube otra foto de tu agenda";
+}
+
+fetchGoogle();
+</script>
+</body>
+</html>
